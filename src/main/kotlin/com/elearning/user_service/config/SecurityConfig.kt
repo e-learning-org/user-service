@@ -1,69 +1,60 @@
 package com.elearning.user_service.config
 
-import org.springframework.beans.factory.annotation.Autowired
+import com.elearning.user_service.entities.Users
+import com.elearning.user_service.repositories.UserRepository
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.http.HttpMethod
-import org.springframework.security.authentication.AuthenticationProvider
-import org.springframework.security.authentication.dao.DaoAuthenticationProvider
-import org.springframework.security.config.Customizer
-import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity
-import org.springframework.security.config.annotation.web.builders.HttpSecurity
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity
-import org.springframework.security.config.http.SessionCreationPolicy
-import org.springframework.security.core.userdetails.UserDetailsService
-import org.springframework.security.crypto.password.NoOpPasswordEncoder
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder
+import org.springframework.security.crypto.password.PasswordEncoder
+import org.springframework.security.authentication.AuthenticationManager
+import org.springframework.security.config.Customizer
+import org.springframework.security.config.annotation.authentication.builders.AuthenticationManagerBuilder
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity
+import org.springframework.security.core.userdetails.UsernameNotFoundException
 import org.springframework.security.web.SecurityFilterChain
-
+import org.springframework.security.config.annotation.web.builders.HttpSecurity
+import org.springframework.security.core.authority.SimpleGrantedAuthority
+import org.springframework.security.core.userdetails.UserDetails
+import org.springframework.security.core.userdetails.UserDetailsService
 
 @Configuration
 @EnableWebSecurity
 @EnableMethodSecurity
-class SecurityConfig (
-    @Autowired
-    private val userDetailsService: UserDetailsService,
-
+class SecurityConfig(
+    private val userRepository: UserRepository
 ) {
     @Bean
-    fun securityFilterChain(http: HttpSecurity) : SecurityFilterChain  {
-    return http.csrf { it.disable() }
-        .authorizeHttpRequests { it
-            .requestMatchers(HttpMethod.POST, "/api/users").permitAll()
-            .anyRequest().authenticated() }
-        .httpBasic(Customizer.withDefaults())
-        .sessionManagement { it.sessionCreationPolicy(SessionCreationPolicy.STATELESS) }
-        .build()
-
-    }
-
-    // Example of in-memory user details (commented out in original Java code)
-    //
-    // @Bean
-    // fun userDetailsService(): UserDetailsService {
-    //     val user1 = User
-    //         .withDefaultPasswordEncoder()
-    //         .username("kiran")
-    //         .password("k@123")
-    //         .roles("USER")
-    //         .build()
-    //
-    //     val user2 = User
-    //         .withDefaultPasswordEncoder()
-    //         .username("harsh")
-    //         .password("h@123")
-    //         .roles("ADMIN")
-    //         .build()
-    //
-    //     return InMemoryUserDetailsManager(user1, user2)
-    // }
-
+    fun passwordEncoder(): PasswordEncoder= BCryptPasswordEncoder()
 
     @Bean
-    fun authenticationProvider(): AuthenticationProvider {
-        val provider = DaoAuthenticationProvider()
-        provider.setPasswordEncoder(NoOpPasswordEncoder.getInstance())
-        provider.setUserDetailsService(userDetailsService)
-        return provider
+    fun authenticationManager(http: HttpSecurity): AuthenticationManager {
+        val authManagerBuilder = http.getSharedObject(AuthenticationManagerBuilder::class.java)
+        authManagerBuilder.userDetailsService(UserDetailsService { username ->
+            val user = userRepository.findByUsername(username)
+                ?: throw UsernameNotFoundException("User not found")
+            UserDetailsImpl(user)
+        }).passwordEncoder(passwordEncoder())
+        return authManagerBuilder.build()
+    }
+    @Bean
+    fun securityFilterChain(http: HttpSecurity): SecurityFilterChain {
+        http.csrf { it.disable() }
+            .authorizeHttpRequests {
+                it.anyRequest().permitAll()
+            }
+            .httpBasic(Customizer.withDefaults())
+        return http.build()
+    }
+    class UserDetailsImpl(val user: Users) : UserDetails {
+        override fun getAuthorities() = listOf(SimpleGrantedAuthority("ROLE_${user.role}"))
+        override fun getPassword() = user.password
+        override fun getUsername() = user.username
+        override fun isAccountNonExpired() = true
+        override fun isAccountNonLocked() = true
+        override fun isCredentialsNonExpired() = true
+        override fun isEnabled() = true
     }
 
 }
